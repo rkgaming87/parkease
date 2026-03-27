@@ -1,28 +1,40 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Sidebar from "@/components/Sidebar";
 import TicketCard from "@/components/TicketCard";
 
 type TicketStatus = "active" | "paid" | "unpaid";
-
-const allTickets = [
-  { id: "TKT-0091", vehicleNo: "MH12AB1234", vehicleType: "Car",   slot: "A-04", entryTime: "09:15 AM", exitTime: undefined,    duration: undefined,  amount: undefined, status: "active" as TicketStatus,  owner: "Ravi Kumar"    },
-  { id: "TKT-0090", vehicleNo: "MH14CD5678", vehicleType: "Bike",  slot: "B-12", entryTime: "08:50 AM", exitTime: "10:30 AM",  duration: "1h 40m",   amount: "40",      status: "paid"   as TicketStatus,  owner: "Neha Patil"    },
-  { id: "TKT-0089", vehicleNo: "MH04EF9012", vehicleType: "SUV",   slot: "A-07", entryTime: "08:20 AM", exitTime: "11:05 AM",  duration: "2h 45m",   amount: "180",     status: "paid"   as TicketStatus,  owner: "Suresh Mehta"  },
-  { id: "TKT-0088", vehicleNo: "MH02GH3456", vehicleType: "Car",   slot: "C-02", entryTime: "07:45 AM", exitTime: undefined,    duration: undefined,  amount: undefined, status: "active" as TicketStatus,  owner: "Priya Sharma"  },
-  { id: "TKT-0087", vehicleNo: "MH01IJ7890", vehicleType: "Truck", slot: "D-01", entryTime: "07:10 AM", exitTime: "09:50 AM",  duration: "2h 40m",   amount: "280",     status: "paid"   as TicketStatus,  owner: "Vijay Singh"   },
-  { id: "TKT-0086", vehicleNo: "MH09KL2345", vehicleType: "Car",   slot: "A-02", entryTime: "06:30 AM", exitTime: "10:15 AM",  duration: "3h 45m",   amount: "160",     status: "unpaid" as TicketStatus,  owner: "Anita Rao"     },
-  { id: "TKT-0085", vehicleNo: "MH05KL6543", vehicleType: "Bike",  slot: "B-03", entryTime: "11:00 AM", exitTime: undefined,    duration: undefined,  amount: undefined, status: "active" as TicketStatus,  owner: "Amit Desai"    },
-  { id: "TKT-0084", vehicleNo: "MH08MN9876", vehicleType: "Auto/Rickshaw", slot: "B-07", entryTime: "10:30 AM", exitTime: "12:00 PM", duration: "1h 30m", amount: "45", status: "paid" as TicketStatus, owner: "Rekha Joshi" },
-];
 
 const statusCls: Record<string, string> = { active: "badge-blue", paid: "badge-green", unpaid: "badge-amber" };
 
 export default function TicketsPage() {
   const [filter, setFilter] = useState<"all" | TicketStatus>("all");
   const [view, setView] = useState<string | null>(null);
+  
+  const [allTickets, setAllTickets] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const filtered = filter === "all" ? allTickets : allTickets.filter(t => t.status === filter);
+  useEffect(() => {
+    async function fetchTickets() {
+      setLoading(true);
+      try {
+        const res = await fetch(`http://localhost:8000/api/tickets?status=${filter}`);
+        if (res.ok) {
+          const data = await res.json();
+          // Assume backend returns all tickets latest first
+          setAllTickets(data.reverse());
+        }
+      } catch (e) {
+        console.error("Failed to fetch tickets:", e);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchTickets();
+  }, [filter]);
+
+  // If filter is passed to the backend, the array is already filtered, but we filter anyway for robustness or if filter change happens fast
+  const filtered = allTickets;
   const viewTicket = allTickets.find(t => t.id === view);
 
   return (
@@ -53,16 +65,18 @@ export default function TicketsPage() {
           {/* Summary row */}
           <div style={{ display: "flex", gap: 16, marginBottom: 24, flexWrap: "wrap" }}>
             {[
-              { label: "Total",   val: allTickets.length,                         color: "#fff" },
-              { label: "Active",  val: allTickets.filter(t=>t.status==="active").length,  color: "var(--blue-l)" },
-              { label: "Paid",    val: allTickets.filter(t=>t.status==="paid").length,    color: "var(--green)" },
-              { label: "Unpaid",  val: allTickets.filter(t=>t.status==="unpaid").length,  color: "var(--amber-l)" },
+              { label: "Showing", val: allTickets.length, color: "#fff" }
             ].map(s => (
               <div key={s.label} className="glass" style={{ padding: "14px 24px", display: "flex", alignItems: "center", gap: 12 }}>
                 <span style={{ fontSize: "1.4rem", fontWeight: 900, color: s.color }}>{s.val}</span>
                 <span style={{ color: "var(--muted)", fontSize: "0.82rem", fontWeight: 600 }}>{s.label}</span>
               </div>
             ))}
+            {loading && (
+              <div style={{ padding: "14px 24px", display: "flex", alignItems: "center", gap: 12 }}>
+                <span style={{ color: "var(--blue-l)", fontSize: "0.82rem", fontWeight: 600 }}>Loading...</span>
+              </div>
+            )}
           </div>
 
           {!view ? (
@@ -93,6 +107,9 @@ export default function TicketsPage() {
                       </td>
                     </tr>
                   ))}
+                  {!loading && filtered.length === 0 && (
+                     <tr><td colSpan={10} style={{textAlign: "center", color: "var(--muted)", padding: "20px"}}>No tickets found</td></tr>
+                  )}
                 </tbody>
               </table>
             </div>

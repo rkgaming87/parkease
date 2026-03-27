@@ -1,20 +1,9 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Sidebar from "@/components/Sidebar";
 import TicketCard from "@/components/TicketCard";
 
-const vehicleTypes = ["Car", "Bike", "SUV", "Truck", "Auto/Rickshaw"];
-const slots: Record<string, string[]> = {
-  Car:            ["A-01","A-02","A-03","A-04","A-05"],
-  Bike:           ["B-01","B-02","B-03","B-04","B-05"],
-  SUV:            ["C-01","C-02","C-03","C-04"],
-  Truck:          ["D-01","D-02","D-03"],
-  "Auto/Rickshaw":["B-06","B-07","B-08"],
-};
-
-function genTicketId() {
-  return `TKT-${Math.floor(1000 + Math.random() * 9000)}`;
-}
+const vehicleTypes = ["Car", "Bike", "SUV", "Truck", "Auto"];
 
 export default function VehicleEntryPage() {
   const [form, setForm] = useState({
@@ -23,23 +12,73 @@ export default function VehicleEntryPage() {
   const [submitted, setSubmitted] = useState(false);
   const [ticket, setTicket] = useState<{ id: string; entryTime: string } | null>(null);
   const [error, setError] = useState("");
+  
+  const [availableSlots, setAvailableSlots] = useState<string[]>([]);
+  const [loadingSlots, setLoadingSlots] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    async function fetchSlots() {
+      if (!form.vehicleType) {
+        setAvailableSlots([]);
+        return;
+      }
+      setLoadingSlots(true);
+      try {
+        const res = await fetch(`http://localhost:8000/api/slots/available?type=${form.vehicleType}`);
+        if (res.ok) {
+          const data = await res.json();
+          setAvailableSlots(data);
+        }
+      } catch (e) {
+        console.error("Failed to fetch slots:", e);
+      } finally {
+        setLoadingSlots(false);
+      }
+    }
+    fetchSlots();
+  }, [form.vehicleType]);
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) {
     const { name, value } = e.target;
     setForm(prev => ({ ...prev, [name]: value, ...(name === "vehicleType" ? { slot: "" } : {}) }));
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     if (!form.vehicleNo || !form.vehicleType || !form.slot) {
       setError("Vehicle Number, Type, and Slot are required.");
       return;
     }
-    const id = genTicketId();
-    const entryTime = new Date().toLocaleString("en-IN", { hour12: true });
-    setTicket({ id, entryTime });
-    setSubmitted(true);
+    
+    setSubmitting(true);
+    try {
+      const res = await fetch("http://localhost:8000/api/tickets/entry", {
+         method: "POST",
+         headers: { "Content-Type": "application/json" },
+         body: JSON.stringify({
+            vehicleNo: form.vehicleNo,
+            vehicleType: form.vehicleType,
+            ownerName: form.ownerName,
+            ownerContact: form.ownerContact,
+            slot: form.slot
+         })
+      });
+      
+      const data = await res.json();
+      if (res.ok) {
+        const entryTime = new Date().toLocaleString("en-IN", { hour12: true });
+        setTicket({ id: data.ticket_id, entryTime });
+        setSubmitted(true);
+      } else {
+        setError(data.detail || "Failed to create ticket.");
+      }
+    } catch (e: any) {
+      setError("Network error. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   function handleReset() {
@@ -48,8 +87,6 @@ export default function VehicleEntryPage() {
     setTicket(null);
     setError("");
   }
-
-  const availableSlots = slots[form.vehicleType] || [];
 
   return (
     <div className="app-layout">
@@ -73,11 +110,11 @@ export default function VehicleEntryPage() {
                   <div className="grid-2" style={{ gap: 20 }}>
                     <div>
                       <label className="label">Vehicle Number *</label>
-                      <input className="input" name="vehicleNo" placeholder="e.g. MH12AB1234" value={form.vehicleNo} onChange={handleChange} />
+                      <input className="input" name="vehicleNo" placeholder="e.g. MH12AB1234" value={form.vehicleNo} onChange={handleChange} required />
                     </div>
                     <div>
                       <label className="label">Vehicle Type *</label>
-                      <select className="input" name="vehicleType" value={form.vehicleType} onChange={handleChange}>
+                      <select className="input" name="vehicleType" value={form.vehicleType} onChange={handleChange} required>
                         <option value="">Select type…</option>
                         {vehicleTypes.map(t => <option key={t}>{t}</option>)}
                       </select>
@@ -92,8 +129,8 @@ export default function VehicleEntryPage() {
                     </div>
                     <div>
                       <label className="label">Assign Slot *</label>
-                      <select className="input" name="slot" value={form.slot} onChange={handleChange} disabled={!form.vehicleType}>
-                        <option value="">{form.vehicleType ? "Select slot…" : "Choose vehicle type first"}</option>
+                      <select className="input" name="slot" value={form.slot} onChange={handleChange} disabled={!form.vehicleType || loadingSlots} required>
+                        <option value="">{loadingSlots ? "Loading slots..." : form.vehicleType ? (availableSlots.length > 0 ? "Select slot…" : "No slots available") : "Choose vehicle type first"}</option>
                         {availableSlots.map(s => <option key={s}>{s}</option>)}
                       </select>
                     </div>
@@ -110,8 +147,10 @@ export default function VehicleEntryPage() {
                   )}
 
                   <div style={{ display: "flex", gap: 12 }}>
-                    <button type="submit" className="btn-primary">🎫 Generate Ticket</button>
-                    <button type="button" className="btn-ghost" onClick={handleReset}>Clear</button>
+                    <button type="submit" className="btn-primary" disabled={submitting}>
+                       {submitting ? "Generating..." : "🎫 Generate Ticket"}
+                    </button>
+                    <button type="button" className="btn-ghost" onClick={handleReset} disabled={submitting}>Clear</button>
                   </div>
                 </form>
               </div>

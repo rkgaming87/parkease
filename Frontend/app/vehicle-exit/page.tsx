@@ -3,50 +3,68 @@ import { useState } from "react";
 import Sidebar from "@/components/Sidebar";
 import TicketCard from "@/components/TicketCard";
 
-// Mocked active tickets database
-const activeTickets: Record<string, { vehicleNo: string; vehicleType: string; slot: string; ownerName: string; entryTime: string; entryMs: number }> = {
-  "TKT-0091": { vehicleNo: "MH12AB1234", vehicleType: "Car",  slot: "A-04", ownerName: "Ravi Kumar",   entryTime: "09:15 AM", entryMs: Date.now() - 2 * 3600000 },
-  "TKT-0088": { vehicleNo: "MH02GH3456", vehicleType: "Car",  slot: "C-02", ownerName: "Priya Sharma", entryTime: "07:45 AM", entryMs: Date.now() - 4 * 3600000 },
-  "TKT-0085": { vehicleNo: "MH05KL6543", vehicleType: "Bike", slot: "B-03", ownerName: "Amit Desai",   entryTime: "11:00 AM", entryMs: Date.now() - 1 * 3600000 },
-};
-
-const ratePerHour: Record<string, number> = { Car: 40, Bike: 20, SUV: 60, Truck: 100, "Auto/Rickshaw": 30 };
 const paymentModes = ["Cash", "UPI", "Card", "Debit/Credit"];
-
-function calcDuration(ms: number) {
-  const totalMin = Math.ceil((Date.now() - ms) / 60000);
-  const h = Math.floor(totalMin / 60);
-  const m = totalMin % 60;
-  return { label: `${h}h ${m}m`, hours: h + m / 60 };
-}
 
 export default function VehicleExitPage() {
   const [search, setSearch] = useState("");
-  const [found, setFound]   = useState<(typeof activeTickets)[string] & { id: string } | null>(null);
+  const [found, setFound]   = useState<any | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [payMode, setPayMode] = useState("Cash");
   const [done, setDone] = useState(false);
+  
+  const [searching, setSearching] = useState(false);
+  const [checkingOut, setCheckingOut] = useState(false);
 
-  function handleSearch(e: React.FormEvent) {
+  async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
+    if (!search.trim()) return;
+    
     const key = search.toUpperCase().trim();
-    const ticket = activeTickets[key];
-    if (ticket) {
-      setFound({ ...ticket, id: key });
-      setNotFound(false);
-    } else {
+    setSearching(true);
+    setNotFound(false);
+    
+    try {
+      const res = await fetch(`http://localhost:8000/api/tickets/active/${key}`);
+      if (res.ok) {
+        const data = await res.json();
+        setFound(data);
+      } else {
+        setFound(null);
+        setNotFound(true);
+      }
+    } catch (e) {
+      console.error("Search failed:", e);
       setFound(null);
       setNotFound(true);
+    } finally {
+      setSearching(false);
     }
   }
 
-  function handleCheckout() { setDone(true); }
+  async function handleCheckout() {
+    if (!found) return;
+    setCheckingOut(true);
+    try {
+      const res = await fetch(`http://localhost:8000/api/tickets/checkout/${found.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentMode: payMode })
+      });
+      if (res.ok) {
+         setDone(true);
+      } else {
+         alert("Checkout failed. Check the console.");
+      }
+    } catch (e) {
+      console.error("Checkout failed:", e);
+    } finally {
+      setCheckingOut(false);
+    }
+  }
+  
   function handleReset() { setSearch(""); setFound(null); setNotFound(false); setDone(false); }
 
   const exitTime = new Date().toLocaleString("en-IN", { hour12: true });
-  const dur = found ? calcDuration(found.entryMs) : null;
-  const rate = found ? ratePerHour[found.vehicleType] || 40 : 0;
-  const amount = dur ? Math.max(Math.ceil(dur.hours * rate), rate) : 0;
 
   return (
     <div className="app-layout">
@@ -68,13 +86,12 @@ export default function VehicleExitPage() {
                 <p style={{ color: "var(--muted)", fontSize: "0.85rem", marginBottom: 20 }}>Enter the Ticket ID to look up the active session.</p>
                 <form onSubmit={handleSearch} style={{ display: "flex", gap: 12 }}>
                   <input className="input" placeholder="e.g. TKT-0091" value={search} onChange={e => setSearch(e.target.value)} style={{ flex: 1 }} />
-                  <button type="submit" className="btn-primary">Search</button>
+                  <button type="submit" className="btn-primary" disabled={searching}>{searching ? "Searching..." : "Search"}</button>
                 </form>
-                <p style={{ color: "var(--muted)", fontSize: "0.75rem", marginTop: 10 }}>Try: TKT-0091 · TKT-0088 · TKT-0085</p>
 
                 {notFound && (
                   <div style={{ marginTop: 16, background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, padding: "10px 14px", fontSize: "0.82rem", color: "#fca5a5" }}>
-                    ⚠ No active ticket found for "{search}". It may already be checked out.
+                    ⚠ No active ticket found for "{search}". It may already be checked out or doesn't exist.
                   </div>
                 )}
               </div>
@@ -91,9 +108,9 @@ export default function VehicleExitPage() {
                         { label: "Vehicle Type", val: found.vehicleType },
                         { label: "Slot",         val: found.slot },
                         { label: "Entry Time",   val: found.entryTime },
-                        { label: "Exit Time",    val: exitTime },
-                        { label: "Duration",     val: dur?.label },
-                        { label: "Rate / Hour",  val: `₹${rate}` },
+                        { label: "Current Exit", val: exitTime },
+                        { label: "Duration",     val: found.duration },
+                        { label: "Status",       val: found.status },
                       ].map(f => (
                         <div key={f.label}>
                           <p style={{ fontSize: "0.7rem", color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 2 }}>{f.label}</p>
@@ -106,7 +123,7 @@ export default function VehicleExitPage() {
                     <div style={{ background: "rgba(37,99,235,0.1)", border: "1px solid rgba(37,99,235,0.25)", borderRadius: 12, padding: "20px 24px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                       <div>
                         <p style={{ fontSize: "0.78rem", color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Total Amount Due</p>
-                        <p style={{ fontSize: "2.4rem", fontWeight: 900, color: "#fff", lineHeight: 1.1 }}>₹{amount}</p>
+                        <p style={{ fontSize: "2.4rem", fontWeight: 900, color: "#fff", lineHeight: 1.1 }}>₹{found.amount}</p>
                       </div>
                       <div style={{ textAlign: "right" }}>
                         <label className="label" style={{ marginBottom: 6 }}>Payment Mode</label>
@@ -118,8 +135,10 @@ export default function VehicleExitPage() {
                   </div>
 
                   <div style={{ display: "flex", gap: 12 }}>
-                    <button className="btn-primary" onClick={handleCheckout}>✅ Confirm Checkout</button>
-                    <button className="btn-ghost"   onClick={handleReset}>Cancel</button>
+                    <button className="btn-primary" onClick={handleCheckout} disabled={checkingOut}>
+                       {checkingOut ? "Processing..." : "✅ Confirm Checkout"}
+                    </button>
+                    <button className="btn-ghost" onClick={handleReset} disabled={checkingOut}>Cancel</button>
                   </div>
                 </div>
               )}
@@ -137,9 +156,9 @@ export default function VehicleExitPage() {
                 slot={found!.slot}
                 entryTime={found!.entryTime}
                 exitTime={exitTime}
-                duration={dur?.label}
-                amount={String(amount)}
-                ownerName={found!.ownerName}
+                duration={found!.duration}
+                amount={String(found!.amount)}
+                ownerName={found!.owner}
                 status="paid"
               />
               <div style={{ display: "flex", gap: 12, marginTop: 20 }}>
